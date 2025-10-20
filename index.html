@@ -2,153 +2,243 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>論文テキスト整形ツール（改良版）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>論文テキスト整形ツール（セクション空行対応）</title>
 <style>
-  body {
-    font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
-    margin: 32px auto;
-    max-width: 1200px;
-    background:#f7f8fa;
-    color:#222;
-    padding:0 18px;
+  :root{
+    --bg:#f7f8fa;
+    --card:#fff;
+    --accent:#0078D7;
+    --muted:#666;
   }
-  h1 { text-align:center; margin-bottom:18px; }
-  .container { display:flex; gap:18px; flex-wrap:wrap; justify-content:center; }
-  .box { flex:1; min-width:420px; display:flex; flex-direction:column; }
-  label { font-weight:600; margin-bottom:8px; color:#333; }
-  textarea {
+  body{
+    font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+    margin: 24px;
+    background:var(--bg);
+    color:#222;
+  }
+  h1{
+    text-align:center;
+    margin-bottom:18px;
+  }
+
+  .container{
+    max-width:1200px;
+    margin:0 auto;
+  }
+
+  .cols{
+    display:flex;
+    gap:20px;
+    align-items:flex-start;
+    justify-content:center;
+    flex-wrap:wrap;
+  }
+
+  .col{
+    flex:1;
+    min-width:420px;
+    display:flex;
+    flex-direction:column;
+  }
+
+  label{
+    font-weight:600;
+    margin-bottom:8px;
+    color:var(--muted);
+  }
+
+  textarea{
     width:100%;
-    height:640px;
+    height:68vh; /* 縦長に */
+    min-height:520px;
     padding:14px;
+    border-radius:10px;
+    border:1px solid #d7dbe0;
+    background:var(--card);
+    resize:vertical;
     font-size:15px;
     line-height:1.7;
+    box-shadow:0 3px 10px rgba(15,20,30,0.03);
+  }
+
+  .controls{
+    display:flex;
+    gap:8px;
+    justify-content:center;
+    margin-top:14px;
+    flex-wrap:wrap;
+  }
+
+  button{
+    padding:10px 16px;
     border-radius:8px;
-    border:1px solid #d0d6dc;
-    background:#fff;
-    resize:vertical;
-    box-shadow:0 2px 6px rgba(0,0,0,0.03);
+    border:none;
+    background:var(--accent);
+    color:white;
+    cursor:pointer;
+    font-size:14px;
   }
-  textarea:focus { outline:none; border-color:#0078D7; box-shadow:0 4px 12px rgba(0,120,215,0.08); }
-  .controls { text-align:center; margin-top:14px; }
-  button {
-    padding:10px 16px; border-radius:8px; border:none; cursor:pointer; font-size:15px;
-    margin:6px;
+
+  button.secondary{
+    background:#4CAF50;
   }
-  #copyBtn { background:#4CAF50; color:white; }
-  @media (max-width:900px) {
-    .container { flex-direction:column; }
-    textarea { height:420px; }
+
+  @media (max-width:900px){
+    .cols{ flex-direction:column; }
+    textarea{ height:40vh; min-height:240px; }
   }
+
+  /* 出力の見やすさ向上 */
+  #output { white-space:pre-wrap; word-break:break-word; }
 </style>
 </head>
 <body>
-<h1>論文テキスト整形ツール（改良）</h1>
+  <div class="container">
+    <h1>論文テキスト整形ツール（セクション空行対応）</h1>
 
-<div class="container">
-  <div class="box">
-    <label for="input">▼ 原文（整形前）</label>
-    <textarea id="input" placeholder="ここに論文テキストを貼り付けてください"></textarea>
+    <div class="cols">
+      <div class="col">
+        <label for="input">▼ 原文（整形前）</label>
+        <textarea id="input" placeholder="ここに論文テキストを貼り付けてください..."></textarea>
+      </div>
+
+      <div class="col">
+        <label for="output">▼ 整形後（Google翻訳向け）</label>
+        <textarea id="output" readonly placeholder="整形結果がここに表示されます..."></textarea>
+      </div>
+    </div>
+
+    <div class="controls" style="margin-top:18px;">
+      <button id="copyBtn" class="secondary">整形結果をコピー</button>
+      <button id="clearBtn" style="background:#e0e0e0;color:#111;">入力をクリア</button>
+    </div>
   </div>
-
-  <div class="box">
-    <label for="output">▼ 整形後（Google翻訳向け）</label>
-    <textarea id="output" readonly placeholder="整形結果がここに表示されます"></textarea>
-  </div>
-</div>
-
-<div class="controls">
-  <button id="copyBtn">整形結果をコピー</button>
-</div>
 
 <script>
-/**
- * 改良版 formatText
- * - セクション/サブセクション番号を壊さない
- * - Self-Evolution. のような太字系タイトルを分離
- * - 文末（. ? !）で分割（簡易ルール）
- */
-function formatText(raw) {
-  if (!raw || !raw.trim()) return "";
+/*
+整形ルール（要点）
+- 列幅による途中改行を潰して、段落を1行の連続テキストにする。
+- Section番号（整数のみ: "5 Title"）の前に改行を3つ挿入（空行3行）。
+- Sub-section番号（小数を含む: "5.1 Title" や "12.3 Title"）の前に改行を2つ挿入（空行2行）。
+- "et al." は "et al." (NBSP) に変換して分割されないようにする。
+- "Self-Evolution." のような長めの単語＋ピリオドは特別に
+    - 前に空行1行追加して、その単語を独立させる
+- 文末で改行する（一文ごとに切る）処理は行わない（無効）
+*/
 
-  // 1) 行をトリムして空行を一旦削除（段組で入る不規則改行を潰す）
-  const lines = raw.split(/\r?\n/).map(s => s.trim());
+const inputEl = document.getElementById('input');
+const outputEl = document.getElementById('output');
+const copyBtn = document.getElementById('copyBtn');
+const clearBtn = document.getElementById('clearBtn');
 
-  // マルチ行の空行は保持しない（後で意図した空行を挿入するため）
-  const nonEmpty = lines.filter(l => l.length > 0);
+function formatText(raw){
+  if(!raw || !raw.trim()) return '';
 
-  // 2) まずは全てをスペースで繋いで一行にする（中途改行を除去）
-  let joined = nonEmpty.join(" ");
+  // 1) normalize line endings
+  let s = raw.replace(/\r/g, '');
 
-  // 3) セクション／サブセクション番号を見つけて、前に所定の空行を挿入する
-  //    パターン: 単語境界で始まり、数字+(.数字)* が続き、その後スペースと英字が来る場所
-  //    例: "5 LLM-Generated..." "5.1 Supervised..." "12.3.4 Title..."
-  const sectionPattern = /(?<!\S)(\d+(?:\.\d+)*)(?=\s+[A-Za-z0-9\u00C0-\u02AF\p{L}\-])/gu;
-  joined = joined.replace(sectionPattern, (m) => {
-    if (m.includes('.')) {
-      // サブセクション: 上に空行2つ
-      return '\n\n' + m;
+  // 2) split into lines, trim each, remove pure-empty lines
+  let lines = s.split(/\n/).map(l => l.trim()).filter(l => l.length > 0);
+
+  // 3) join into single line (collapse column wrap)
+  s = lines.join(' ');
+
+  // 4) protect common phrases that must not be split
+  s = s.replace(/\bet\s+al\./gi, 'et\u00A0al.');
+
+  // 5) Section / Sub-section spacing
+  //    5, 12, 5.1, 12.3 などを判定して改行
+  s = s.replace(/\b(\d+(?:\.\d+)*)\s+([A-Z])/g, (m, num, nextChar) => {
+    const isSub = num.includes('.');
+    if(isSub){
+      // sub-section: 2行前に空行1行
+      return '\n\n' + num + ' ' + nextChar;
     } else {
-      // セクション: 上に空行3つ
-      return '\n\n\n' + m;
+      // section: 3行前に空行2行
+      return '\n\n\n' + num + ' ' + nextChar;
     }
   });
 
-  // 4) Self-Evolution. のような「大文字で始まる単語（ハイフン可） + . 」を分離
-  //    例: "Self-Evolution. Huang et al..." -> "\nSelf-Evolution.\nHuang et al..."
-  //    ただし "Fig." や短い頭字語を壊さないために長めの単語(>=3) を対象にする
-  const titlePattern = /(?<!\S)([A-Z][A-Za-z\-]{2,})\.\s+/g;
-  joined = joined.replace(titlePattern, (m, w) => {
-    return '\n' + w + '.\n';
-  });
+  // 6) Special-case: title-like words (Self-Evolution.) not immediately after section/sub-section
+  s = s.replace(
+    /(^|\n)(?!\d+(\.\d+)*\s)([A-Z][A-Za-z\-]{2,}(?:-[A-Z][A-Za-z\-]{2,})*[.:])/g,
+    (match, p1, p2, word) => {
+      // 文頭か改行直後、かつ section/sub-section 直後でなければ改行
+      return p1 + '\n' + word + '\n';
+    }
+  );
 
-  // 5) 文末句点（. ? !）で改行。ただし略語や小文字の後はあまり分けない
-  //    簡易ルール: 英数字/右括弧 の直後に句点があり、そこからスペース＋大文字が続く場合
-  joined = joined.replace(/([A-Za-z0-9\)\]」』])([.?!])\s+(?=[A-Z0-9\(「『])/g, '$1$2\n');
+  // 7) cleanup: collapse multiple spaces and limit consecutive newlines
+  s = s.replace(/[ \t]{2,}/g, ' ');
+  s = s.replace(/\n{4,}/g, '\n\n\n');
 
-  // 6) 余分な空白を整える（連続するスペースを1つ、連続改行は最大3つまでに）
-  joined = joined.replace(/[ \t]{2,}/g, ' ');
-  joined = joined.replace(/\n{4,}/g, '\n\n\n'); // 4つ以上の改行は3つに
-  joined = joined.replace(/\n{3,}/g, match => {
-    // 三つ改行はセクション目印として残す
-    return (match.length >= 3) ? match : match;
-  });
+  // 8) trim
+  s = s.replace(/^\s+/, '');
+  s = s.replace(/\s+$/, '');
 
-  // トリムして返却
-  return joined.trim();
+  return s;
 }
 
-// リアルタイムで整形（入力ごとに即反映）
-const inputEl = document.getElementById('input');
-const outputEl = document.getElementById('output');
+// Debounced real-time formatting
+let tmr = null;
+function scheduleFormat(){
+  if(tmr) clearTimeout(tmr);
+  tmr = setTimeout(() => {
+    outputEl.value = formatText(inputEl.value);
+  }, 120);
+}
 
-// デバウンス（高速連打で重くならないように短めの抑速）
-let timer = null;
-inputEl.addEventListener('input', (e) => {
-  if (timer) clearTimeout(timer);
-  timer = setTimeout(() => {
-    outputEl.value = formatText(e.target.value);
-  }, 150); // 150ms の短い遅延で実質リアルタイム
+
+// Events
+inputEl.addEventListener('input', scheduleFormat);
+inputEl.addEventListener('paste', () => {
+  // after paste, schedule
+  setTimeout(scheduleFormat, 50);
 });
 
-// コピー機能
-document.getElementById('copyBtn').addEventListener('click', () => {
-  if (!outputEl.value) { alert('整形結果が空です。'); return; }
+// copy
+copyBtn.addEventListener('click', () => {
+  if(!outputEl.value){
+    alert('整形結果が空です。入力を確認してください。');
+    return;
+  }
   outputEl.select();
-  try {
+  try{
     document.execCommand('copy');
-    alert('整形済みテキストをコピーしました。');
-  } catch (err) {
-    alert('コピーに失敗しました。ブラウザの互換性を確認してください。');
+    //alert('整形済みテキストをコピーしました。');
+  } catch(e){
+    alert('コピーに失敗しました。ブラウザによっては許可が必要です。');
   }
 });
 
-// ペースト時にも即変換（貼り付けられたら処理）
-inputEl.addEventListener('paste', () => {
-  setTimeout(() => {
-    outputEl.value = formatText(inputEl.value);
-  }, 50);
+// clear
+clearBtn.addEventListener('click', () => {
+  if(confirm('入力欄をクリアしますか？')){
+    inputEl.value = '';
+    outputEl.value = '';
+  }
 });
+
+// 初期サンプル（あればテスト用に自動で整形して表示したい場合はここを編集）
+/*
+inputEl.value = `5 LLM-Generated Annotations
+Utilization
+LLM-generated annotations provide a valuable resource
+of labeled data for NLP models in different
+stages. Hereby we explore the methods for utilizing
+and learning with LLM-Generated Annotations.
+5.1 Supervised Fine-Tuning
+Supervised fine-tuning can effectively enhance
+models’ specific capabilities or knowledge. In this
+section, we discuss the utilization of generated annotation
+for supervised fine-tuning.
+Self-Evolution. Huang et al. (2023) first propose
+the concept of self-improve that utilizes LLMs as
+both data annotators and learnable models and iteratively`;
+scheduleFormat();
+*/
+
 </script>
 </body>
 </html>
