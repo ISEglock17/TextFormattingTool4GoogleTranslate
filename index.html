@@ -149,7 +149,7 @@ function formatText(raw){
 
   // 5) Section / Sub-section spacing
   //    5, 12, 5.1, 12.3 などを判定して改行
-  s = s.replace(/(?<![\d,])\b(\d+(?:\.\d+)+|\d+)\s+([A-Z])/g, (m, num, nextChar) => {
+  s = s.replace(/(?<=^|\.\s|\n)\s*(\d+(?:\.\d+)*)\s+([A-Z])/g, (m, num, nextChar) => {
     const isSub = num.includes('.');
     if(isSub){
       // sub-section: 2行前に空行1行
